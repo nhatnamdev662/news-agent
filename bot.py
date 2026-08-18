@@ -765,7 +765,8 @@ def main():
         print("Hãy sửa .env hoặc dùng: nhatnam config")
         return
     provider = get_provider(config.AI_PROVIDER)
-    config.CUSTOM_MODEL
+    cur_model = config.OPENCODE_MODEL if config.AI_PROVIDER == "opencode" else config.CUSTOM_MODEL
+
     print(f"🚀 AI Agent News Bot — provider: {config.AI_PROVIDER} | model: {cur_model}")
 
     app = Application.builder().token(config.BOT_TOKEN).post_init(post_init).build()
