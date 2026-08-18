@@ -362,9 +362,9 @@ async def btn(update, ctx):
             await query.edit_message_text("⚠️ Provider không hợp lệ.")
             return
         _save_env("AI_PROVIDER", prov_name)
-        config.AI_PROVIDER = prov_name
+        # provider changed via config
         provider = get_provider(prov_name)
-        cur_model = config.OPENCODE_MODEL if prov_name == "opencode" else config.CUSTOM_MODEL
+        cur_model = config.CUSTOM_MODEL if prov_name == "opencode" else config.CUSTOM_MODEL
         await query.edit_message_text(
             f"✅ Đã chuyển sang provider: <b>{prov_name}</b>\n"
             f"Model hiện tại: <b>{cur_model or 'chưa chọn'}</b>\n"
@@ -377,16 +377,16 @@ async def btn(update, ctx):
             await query.edit_message_text("⚠️ Chỉ admin mới được đổi model.")
             return
         model_name = data.split(":", 1)[1]
-        env_key = "OPENCODE_MODEL" if config.AI_PROVIDER == "opencode" else "CUSTOM_MODEL"
+        env_key = "CUSTOM_MODEL"
         _save_env(env_key, model_name)
-        if config.AI_PROVIDER == "opencode":
-            config.OPENCODE_MODEL = model_name
+        if False:  # opencode removed
+            config.CUSTOM_MODEL = model_name
         else:
             config.CUSTOM_MODEL = model_name
-        provider = get_provider(config.AI_PROVIDER)
+        provider = get_provider("custom")
         await query.edit_message_text(
             f"✅ Đã chọn model: <b>{model_name}</b>\n"
-            f"Provider: {config.AI_PROVIDER}",
+            f"Provider: {"custom"}",
             parse_mode=ParseMode.HTML)
 
     # --- Unknown ---
@@ -476,52 +476,11 @@ async def _reply(update, query, text: str, with_kb: bool = True, category: str =
 
 # ==================== ADMIN: PROVIDER / MODEL ====================
 
-async def set_provider(update, ctx):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⚠️ Lệnh này chỉ dành cho admin.", parse_mode=ParseMode.HTML)
-        return
-    providers = list_providers()
-    rows = []
-    for p in providers:
-        mark = "✅ " if p == config.AI_PROVIDER else ""
-        rows.append([InlineKeyboardButton(f"{mark}{p}", callback_data=f"pick_provider:{p}")])
-    kb = InlineKeyboardMarkup(rows)
-    await update.message.reply_text(
-        "<b>⚙️ Chọn provider AI</b>\n━━━━━━━━━━━━━━━━\n"
-        "• <b>opencode</b> — không cần API key, tự scan model\n"
-        "• <b>custom</b> — cần API key + base URL",
-        parse_mode=ParseMode.HTML, reply_markup=kb)
-
-
 async def set_model(update, ctx):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⚠️ Lệnh này chỉ dành cho admin.", parse_mode=ParseMode.HTML)
-        return
-    await update.message.reply_text("⏳ Đang quét danh sách model...", parse_mode=ParseMode.HTML)
-    prov = get_provider(config.AI_PROVIDER)
-    models = await prov.fetch_models()
-    if not models:
-        await update.message.reply_text(
-            "⚠️ Không quét được model. Kiểm tra lại:\n"
-            "• Provider: <b>{}</b>\n"
-            "• URL: {}".format(
-                config.AI_PROVIDER,
-                config.OPENCODE_API_URL or config.CUSTOM_API_URL or "chưa cấu hình"),
-            parse_mode=ParseMode.HTML)
-        return
-    rows = []
-    current = config.OPENCODE_MODEL if config.AI_PROVIDER == "opencode" else config.CUSTOM_MODEL
-    for m in models[:20]:
-        mark = "✅ " if m == current else ""
-        rows.append([InlineKeyboardButton(f"{mark}{m}", callback_data=f"pick_model:{m}")])
-    kb = InlineKeyboardMarkup(rows)
     await update.message.reply_text(
-        f"<b>⚙️ Chọn model ({config.AI_PROVIDER})</b>\n"
-        f"Tổng: {len(models)} model — hiển thị 20 đầu:",
-        parse_mode=ParseMode.HTML, reply_markup=kb)
+        "⚠️ Dùng <code>nhatnam config</code> trên Termux để đổi model.",
+        parse_mode=ParseMode.HTML)
 
-
-# ==================== SCHEDULE / SCAN ====================
 
 async def schedule_cmd(update, ctx):
     if not is_admin(update.effective_user.id):
@@ -598,12 +557,12 @@ async def settings_cmd(update, ctx):
         return
     user = db.get_user(update.effective_user.id)
     sched = (user or {}).get("schedule_time", "off")
-    cur_model = config.OPENCODE_MODEL if config.AI_PROVIDER == "opencode" else config.CUSTOM_MODEL
-    cur_url = config.OPENCODE_API_URL if config.AI_PROVIDER == "opencode" else config.CUSTOM_API_URL
+    config.CUSTOM_MODEL
+    config.CUSTOM_API_URL
     await update.message.reply_text(
         "<b>⚙️ Cấu hình hiện tại</b>\n━━━━━━━━━━━━━━━━\n"
         f"• BOT_TOKEN: {'✅' if config.BOT_TOKEN else '❌'}\n"
-        f"• Provider: <b>{config.AI_PROVIDER}</b>\n"
+        f"• Provider: <b>{"custom"}</b>\n"
         f"• Model: <b>{cur_model or '❌ chưa chọn'}</b>\n"
         f"• API URL: <code>{cur_url or 'mặc định'}</code>\n"
         f"• Admin Chat ID: <code>{config.ADMIN_CHAT_ID or 'không đặt'}</code>\n"
@@ -739,8 +698,7 @@ async def on_startup(app):
         BotCommand("the_loai", "Chọn thể loại"),
         BotCommand("ho_tro", "Hướng dẫn sử dụng"),
         BotCommand("ping", "Kiểm tra bot"),
-        BotCommand("set_provider", "Chọn provider AI (admin)"),
-        BotCommand("set_model", "Chọn model AI (admin)"),
+        BotCommand("set_model", "Đổi model (admin)"),
         BotCommand("schedule", "Đặt lịch gửi tin (admin)"),
         BotCommand("scan", "Quét tự động (admin)"),
         BotCommand("scan_now", "Quét ngay (admin)"),
@@ -767,9 +725,9 @@ def main():
             print("  -", e)
         print("Hãy sửa .env hoặc dùng: nhatnam config")
         return
-    provider = get_provider(config.AI_PROVIDER)
-    cur_model = config.OPENCODE_MODEL if config.AI_PROVIDER == "opencode" else config.CUSTOM_MODEL
-    print(f"🚀 AI Agent News Bot — provider: {config.AI_PROVIDER} | model: {cur_model}")
+    provider = get_provider("custom")
+    config.CUSTOM_MODEL
+    print(f"🚀 AI Agent News Bot — provider: {"custom"} | model: {cur_model}")
 
     app = Application.builder().token(config.BOT_TOKEN).post_init(post_init).build()
 
@@ -779,7 +737,6 @@ def main():
     app.add_handler(CommandHandler(["news", "tin"], news_cmd))
     app.add_handler(CommandHandler(["search", "tim"], search_cmd))
     app.add_handler(CommandHandler("the_loai", news_cmd))
-    app.add_handler(CommandHandler("set_provider", set_provider))
     app.add_handler(CommandHandler("set_model", set_model))
     app.add_handler(CommandHandler("schedule", schedule_cmd))
     app.add_handler(CommandHandler("scan", scan_cmd))
