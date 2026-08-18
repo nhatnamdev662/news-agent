@@ -2,16 +2,19 @@ import os
 import asyncio
 from .base import BaseLLMProvider
 
+DEFAULT_BASE_URL = "https://opencode.ai/zen/v1"
+DEFAULT_MODEL = "deepseek-v4-flash-free"
+
 
 class OpenCodeProvider(BaseLLMProvider):
-    """Provider OpenCode — không cần API key, dùng endpoint zen/v1."""
-
-    DEFAULT_BASE_URL = "https://opencode.ai/zen/v1"
+    """Provider OpenCode — không cần API key, miễn phí."""
 
     def __init__(self):
         super().__init__()
-        self.base_url = os.getenv("OPENCODE_API_URL", self.DEFAULT_BASE_URL).strip().rstrip("/")
-        self.model = os.getenv("OPENCODE_MODEL", "deepseek-v4-flash-free").strip()
+        url = os.getenv("OPENCODE_API_URL", "").strip()
+        self.base_url = url if url else DEFAULT_BASE_URL
+        model = os.getenv("OPENCODE_MODEL", "").strip()
+        self.model = model if model else DEFAULT_MODEL
         self.timeout = 30
 
     def _headers(self):
@@ -31,12 +34,7 @@ class OpenCodeProvider(BaseLLMProvider):
             if resp.status_code != 200:
                 return []
             data = resp.json()
-            models = []
-            for m in data.get("data", []):
-                mid = m.get("id", "")
-                if mid:
-                    models.append(mid)
-            return sorted(models)
+            return sorted([m["id"] for m in data.get("data", []) if m.get("id")])
         except Exception:
             return []
 
@@ -49,8 +47,6 @@ class OpenCodeProvider(BaseLLMProvider):
         }
 
     async def chat(self, prompt, max_tokens=2048, temperature=0.7):
-        if not self.model:
-            raise RuntimeError("OPENCODE_MODEL chưa cấu hình — chạy nhatnam config")
         import requests
         headers = self._headers()
         payload = self._payload(prompt, max_tokens, temperature)
@@ -70,7 +66,7 @@ class OpenCodeProvider(BaseLLMProvider):
         if resp.status_code != 200:
             raise RuntimeError("OpenCode HTTP " + str(resp.status_code) + " | " + body[:200])
         if not body:
-            raise RuntimeError("OpenCode trả về nội dung rỗng")
+            raise RuntimeError("OpenCode trả về rỗng")
         try:
             data = resp.json()
         except ValueError:
@@ -82,4 +78,4 @@ class OpenCodeProvider(BaseLLMProvider):
         try:
             return data["choices"][0]["message"]["content"].strip()
         except (KeyError, IndexError):
-            raise RuntimeError("OpenCode không trả về 'choices': " + body[:200])
+            raise RuntimeError("OpenCode không có 'choices': " + body[:200])
