@@ -1,27 +1,10 @@
 #!/usr/bin/env bash
 # nhatnam — khoi chay AI Agent News Bot
-#   nhatnam          -> validate (+ probe provider) -> chay bot (Ctrl+C tat)
-#   nhatnam config   -> xem/sua cau hinh (Enter = giu nguyen)
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV="${DIR}/.env"
 
 getv() { grep -E "^$1=" "${ENV}" 2>/dev/null | head -1 | cut -d= -f2-; }
-
-missing() {
-    ( grep -q "^BOT_TOKEN=.\+" "${ENV}" 2>/dev/null ) || echo "BOT_TOKEN"
-    ( grep -q "^AI_PROVIDER=.\+" "${ENV}" 2>/dev/null ) || echo "AI_PROVIDER"
-    local prov
-    prov="$(getv AI_PROVIDER)"
-    prov="${prov:-opencode}"
-    if [ "${prov}" = "custom" ]; then
-        ( grep -q "^CUSTOM_API_KEY=.\+" "${ENV}" 2>/dev/null ) || echo "CUSTOM_API_KEY"
-        ( grep -q "^CUSTOM_API_URL=.\+" "${ENV}" 2>/dev/null ) || echo "CUSTOM_API_URL"
-        ( grep -q "^CUSTOM_MODEL=.\+" "${ENV}" 2>/dev/null ) || echo "CUSTOM_MODEL"
-    elif [ "${prov}" = "opencode" ]; then
-        ( grep -q "^OPENCODE_MODEL=.\+" "${ENV}" 2>/dev/null ) || echo "OPENCODE_MODEL"
-    fi
-}
 
 edit_env() {
     local name="$1" value="$2"
@@ -32,36 +15,45 @@ edit_env() {
     fi
 }
 
+# Quet danh sach model tu OpenCode API
+scan_models() {
+    local base_url="$1"
+    curl -s --connect-timeout 8 --max-time 12 "${base_url}/models" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    models = [m['id'] for m in data.get('data', []) if m.get('id')]
+    for m in sorted(models):
+        print(m)
+except:
+    pass
+" 2>/dev/null
+}
+
 do_config() {
     [ -f "${ENV}" ] || touch "${ENV}"
     echo ""
     echo "╔══════════════════════════════════════════════╗"
-    echo "║   ⚙️  CAU HINH AI AGENT NEWS BOT            ║"
+    echo "║   ⚙️  CẤU HÌNH AI AGENT NEWS BOT            ║"
     echo "║   Nhấn Enter để giữ nguyên giá trị hiện tại ║"
     echo "╚══════════════════════════════════════════════╝"
     echo ""
 
-    edit_var() {
-        local name="$1" prompt="$2" cur
-        cur="$(getv "${name}")"
-        read -p "${prompt} [${cur:-}]: " v
-        if [ -z "${v}" ]; then v="${cur}"; fi
-        edit_env "${name}" "${v}"
-    }
-
-    # 1. BOT_TOKEN
+    # --- 1. BOT TOKEN ---
     echo "━━━ 1. TELEGRAM BOT ━━━"
-    edit_var BOT_TOKEN "   Token bot: "
+    cur_token="$(getv BOT_TOKEN)"
+    read -p "   Token bot [${cur_token}]: " v
+    edit_env "BOT_TOKEN" "${v:-${cur_token}}"
     echo ""
 
-    # 2. AI Provider — map so -> ten
+    # --- 2. AI PROVIDER ---
     echo "━━━ 2. AI PROVIDER ━━━"
     echo "   1) opencode  — không cần API key, tự scan model"
-    echo "   2) custom    — cần API key + base URL (OpenAI-compatible)"
+    echo "   2) custom    — cần API key + base URL"
     echo ""
     cur_prov="$(getv AI_PROVIDER)"
     cur_prov="${cur_prov:-opencode}"
-    read -p "   Chon [${cur_prov}]: " prov_input
+    read -p "   Chọn [${cur_prov}]: " prov_input
     if [ -n "${prov_input}" ]; then
         case "${prov_input}" in
             1|opencode) prov="opencode" ;;
@@ -75,23 +67,78 @@ do_config() {
     echo "   ✅ Provider: ${prov}"
     echo ""
 
-    # 3. Provider chi tiet
-    if [ "${prov}" = "custom" ]; then
+    # --- 3. Provider chi tiet ---
+    if [ "${prov}" = "opencode" ]; then
+        echo "━━━ 3. CHỌN MODEL (OpenCode) ━━━"
+        echo "   Không cần API key — đang quét danh sách model..."
+        echo ""
+
+        cur_model="$(getv OPENCODE_MODEL)"
+        models_text="$(scan_models "https://api.opencode.ai/v1")"
+
+        if [ -n "${models_text}" ]; then
+            # Hien danh sach va cho chon
+            models=()
+            while IFS= read -r line; do
+                [ -n "$line" ] && models+=("$line")
+            done <<< "${models_text}"
+            count=${#models[@]}
+
+            echo "   📋 Tìm thấy ${count} model:"
+            echo "   ─────────────────────────────────"
+            idx=1
+            cur_idx=""
+            for m in "${models[@]}"; do
+                if [ "$m" = "${cur_model}" ]; then
+                    echo "   ${idx}) ✅ ${m}  ← hiện tại"
+                    cur_idx="${idx}"
+                else
+                    echo "   ${idx}) ${m}"
+                fi
+                idx=$((idx+1))
+            done
+            echo "   ─────────────────────────────────"
+            default="${cur_idx:-1}"
+            read -p "   Chọn model [${default}]: " choice
+            if [ -z "${choice}" ]; then choice="${default}"; fi
+
+            if [[ "${choice}" =~ ^[0-9]+$ ]] && [ "${choice}" -ge 1 ] && [ "${choice}" -le "${count}" ]; then
+                chosen="${models[$((choice-1))]}"
+            else
+                chosen="${choice}"
+            fi
+            echo "   ✅ Model: ${chosen}"
+            edit_env "OPENCODE_MODEL" "${chosen}"
+        else
+            echo "   ⚠️  Không quét được danh sách model."
+            echo "   Nhập tay model name:"
+            read -p "   Model [${cur_model}]: " v
+            edit_env "OPENCODE_MODEL" "${v:-${cur_model}}"
+        fi
+
+    elif [ "${prov}" = "custom" ]; then
         echo "━━━ 3. CUSTOM PROVIDER ━━━"
-        edit_var CUSTOM_API_KEY   "   API Key: "
-        edit_var CUSTOM_API_URL   "   Base URL (vd: https://api.example.com/v1): "
-        edit_var CUSTOM_MODEL     "   Model (vd: gpt-4o): "
-    elif [ "${prov}" = "opencode" ]; then
-        echo "━━━ 3. OPENCODE PROVIDER ━━━"
-        echo "   (Không cần API key — chỉ cần chọn model)"
-        edit_var OPENCODE_API_URL "   API URL (để trống = dùng mặc định): "
-        edit_var OPENCODE_MODEL   "   Model: "
+        cur_key="$(getv CUSTOM_API_KEY)"
+        cur_url="$(getv CUSTOM_API_URL)"
+        cur_model="$(getv CUSTOM_MODEL)"
+
+        read -p "   API Key [${cur_key}]: " v
+        edit_env "CUSTOM_API_KEY" "${v:-${cur_key}}"
+
+        read -p "   Base URL [${cur_url:-https://api.darkapi.dev/v1}]: " v
+        edit_env "CUSTOM_API_URL" "${v:-${cur_url:-https://api.darkapi.dev/v1}}"
+
+        read -p "   Model [${cur_model:-laguna-s-2.1-free}]: " v
+        edit_env "CUSTOM_MODEL" "${v:-${cur_model:-laguna-s-2.1-free}}"
     fi
     echo ""
 
-    # 4. Admin + Scan
+    # --- 4. Tùy chọn ---
     echo "━━━ 4. TÙY CHỌN ━━━"
-    edit_var ADMIN_CHAT_ID       "   Admin Chat ID (để trống = bỏ qua): "
+    cur_admin="$(getv ADMIN_CHAT_ID)"
+    read -p "   Admin Chat ID [${cur_admin}]: " v
+    edit_env "ADMIN_CHAT_ID" "${v:-${cur_admin}}"
+
     cur_min="$(getv SCAN_MINUTES)"
     read -p "   Scan mỗi X phút [${cur_min:-5}]: " mins
     if [ -n "${mins}" ]; then
@@ -99,18 +146,19 @@ do_config() {
     fi
     echo ""
 
+    # --- Summary ---
     echo "╔══════════════════════════════════════════════╗"
     echo "║  ✅ Đã lưu cấu hình!                        ║"
-    echo "║  Chạy 'nhatnam' để khởi động bot            ║"
     echo "╚══════════════════════════════════════════════╝"
     echo ""
-    # Hien thi.tom tat
-    echo "📋 Cấu hình hiện tại:"
-    echo "   BOT_TOKEN:     $([ -n "$(getv BOT_TOKEN)" ] && echo '✅ Đã cấu hình' || echo '❌ Chưa có')"
-    echo "   AI_PROVIDER:   ${prov}"
-    echo "   Model:         $(getv OPENCODE_MODEL 2>/dev/null || getv CUSTOM_MODEL 2>/dev/null || echo '❌ Chưa chọn')"
-    echo "   Admin Chat ID: $(getv ADMIN_CHAT_ID 2>/dev/null || echo 'Không đặt')"
-    echo "   Scan mỗi:      $(getv SCAN_MINUTES 2>/dev/null || echo '5') phút"
+    if [ "${prov}" = "opencode" ]; then
+        echo "   Model: $(getv OPENCODE_MODEL 2>/dev/null || echo '❌')"
+    else
+        echo "   Model: $(getv CUSTOM_MODEL 2>/dev/null || echo '❌')"
+        echo "   API:   $(getv CUSTOM_API_URL 2>/dev/null || echo '❌')"
+    fi
+    echo ""
+    echo "🚀 Chạy 'nhatnam' để khởi động"
     echo ""
 }
 
