@@ -50,8 +50,8 @@ ensure_tools() {
         fi
     fi
 
-    command -v git >/dev/null 2>&1 || fail "Vẫn thiếu git. Thử: pkg update && pkg upgrade && pkg install -y git python"
-    command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 || fail "Vẫn thiếu python. Thử: pkg install -y python"
+    command -v git >/dev/null 2>&1 || fail "Vẫn thiếu git"
+    command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 || fail "Vẫn thiếu python"
     ok "Đã cài xong công cụ"
 }
 ensure_tools
@@ -80,25 +80,41 @@ fi
 cd "${REPO_DIR}"
 
 # ---------- 4) Cài thư viện Python ----------
-step "Cài thư viện Python (hiện progress bên dưới)"
+step "Cài thư viện Python"
 if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 
-echo "  ⏳ Nâng cấp pip..."
-"${PY}" -m pip install --upgrade pip || true
+# Termux: KHÔNG upgrade pip (bị cấm)
+if [ "${IS_TERMUX}" = "yes" ]; then
+    ok "Bỏ qua upgrade pip (Termux cấm)"
+else
+    echo "  ⏳ Nâng cấp pip..."
+    "${PY}" -m pip install --upgrade pip 2>/dev/null || ok "pip đã mới nhất"
+fi
 
 echo "  ⏳ Cài thư viện theo requirements.txt..."
-if "${PY}" -m pip install -r requirements.txt; then
+if "${PY}" -m pip install -r requirements.txt 2>/dev/null; then
     ok "Thư viện đã cài xong"
-elif "${PY}" -m pip install --break-system-packages -r requirements.txt; then
+elif "${PY}" -m pip install --break-system-packages -r requirements.txt 2>/dev/null; then
     ok "Thư viện đã cài xong"
 else
-    fail "Cài thư viện thất bại — xem lỗi ở trên. Thử chạy tay: ${PY} -m pip install -r requirements.txt"
+    fail "Cài thư viện thất bại. Thử: ${PY} -m pip install -r requirements.txt"
 fi
 
 # ---------- 5) Tạo .env ----------
 step "Tạo cấu hình .env"
 if [ ! -f ".env" ]; then
-    cp /tmp/env_template.txt .env
+    cat > .env << 'ENVEOF'
+# AI Agent News Bot — cấu hình
+# Nhập: nhatnam config
+
+BOT_TOKEN=
+CUSTOM_API_KEY=
+CUSTOM_API_URL=https://api.darkapi.dev/v1
+CUSTOM_MODEL=laguna-s-2.1-free
+ADMIN_CHAT_ID=
+MAX_ARTICLES=6
+SCAN_MINUTES=5
+ENVEOF
     ok "Đã tạo .env mẫu"
 else
     ok ".env đã tồn tại"
@@ -147,8 +163,3 @@ echo ""
 echo "Bước tiếp theo:"
 echo "  1) nhatnam config   → nhập token bot + key AI"
 echo "  2) nhatnam          → chạy bot (tắt bằng Ctrl+C)"
-echo ""
-echo "💡 Ghi chú:"
-echo "  - Thiếu cấu hình thì nhatnam tự hỏi nhập ngay"
-echo "  - Bot tự restart khi lỗi (watchdog)"
-echo "  - Termux: cài thêm app 'Termux:Boot' để tự chạy khi mở máy"
