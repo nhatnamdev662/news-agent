@@ -1,0 +1,6 @@
+# python-telegram-bot cần [job-queue] để dùng JobQueue (lên lịch gửi tin)
+python-telegram-bot[job-queue]>=21.0
+feedparser>=6.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+python-dotenv>=1.0.0

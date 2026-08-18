@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# nhatnam — khoi chay AI Agent News Bot
+#   nhatnam          -> validate (+ probe provider) -> chay bot (Ctrl+C tat)
+#   nhatnam config   -> xem/sua cau hinh (Enter = giu nguyen)
+set -uo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV="${DIR}/.env"
+
+getv() { grep -E "^$1=" "${ENV}" 2>/dev/null | head -1 | cut -d= -f2-; }
+
+missing() {
+    ( grep -q "^BOT_TOKEN=.\+" "${ENV}" 2>/dev/null ) || echo "BOT_TOKEN"
+    ( grep -q "^AI_PROVIDER=.\+" "${ENV}" 2>/dev/null ) || echo "AI_PROVIDER"
+    local prov
+    prov="$(getv AI_PROVIDER)"
+    prov="${prov:-opencode}"
+    if [ "${prov}" = "custom" ]; then
+        ( grep -q "^CUSTOM_API_KEY=.\+" "${ENV}" 2>/dev/null ) || echo "CUSTOM_API_KEY"
+        ( grep -q "^CUSTOM_API_URL=.\+" "${ENV}" 2>/dev/null ) || echo "CUSTOM_API_URL"
+        ( grep -q "^CUSTOM_MODEL=.\+" "${ENV}" 2>/dev/null ) || echo "CUSTOM_MODEL"
+    elif [ "${prov}" = "opencode" ]; then
+        ( grep -q "^OPENCODE_MODEL=.\+" "${ENV}" 2>/dev/null ) || echo "OPENCODE_MODEL"
+    fi
+}
+
+edit_env() {
+    local name="$1" value="$2"
+    if grep -q "^${name}=" "${ENV}" 2>/dev/null; then
+        sed -i "s|^${name}=.*|${name}=${value}|" "${ENV}"
+    else
+        echo "${name}=${value}" >> "${ENV}"
+    fi
+}
+
+do_config() {
+    [ -f "${ENV}" ] || touch "${ENV}"
+    echo ""
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║   ⚙️  CAU HINH AI AGENT NEWS BOT            ║"
+    echo "║   Nhấn Enter để giữ nguyên giá trị hiện tại ║"
+    echo "╚══════════════════════════════════════════════╝"
+    echo ""
+
+    edit_var() {
+        local name="$1" prompt="$2" cur
+        cur="$(getv "${name}")"
+        read -p "${prompt} [${cur:-}]: " v
+        if [ -z "${v}" ]; then v="${cur}"; fi
+        edit_env "${name}" "${v}"
+    }
+
+    # 1. BOT_TOKEN
+    echo "━━━ 1. TELEGRAM BOT ━━━"
+    edit_var BOT_TOKEN "   Token bot: "
+    echo ""
+
+    # 2. AI Provider — map so -> ten
+    echo "━━━ 2. AI PROVIDER ━━━"
+    echo "   1) opencode  — không cần API key, tự scan model"
+    echo "   2) custom    — cần API key + base URL (OpenAI-compatible)"
+    echo ""
+    cur_prov="$(getv AI_PROVIDER)"
+    cur_prov="${cur_prov:-opencode}"
+    read -p "   Chon [${cur_prov}]: " prov_input
+    if [ -n "${prov_input}" ]; then
+        case "${prov_input}" in
+            1|opencode) prov="opencode" ;;
+            2|custom)   prov="custom" ;;
+            *)          prov="${prov_input}" ;;
+        esac
+    else
+        prov="${cur_prov}"
+    fi
+    edit_env "AI_PROVIDER" "${prov}"
+    echo "   ✅ Provider: ${prov}"
+    echo ""
+
+    # 3. Provider chi tiet
+    if [ "${prov}" = "custom" ]; then
+        echo "━━━ 3. CUSTOM PROVIDER ━━━"
+        edit_var CUSTOM_API_KEY   "   API Key: "
+        edit_var CUSTOM_API_URL   "   Base URL (vd: https://api.example.com/v1): "
+        edit_var CUSTOM_MODEL     "   Model (vd: gpt-4o): "
+    elif [ "${prov}" = "opencode" ]; then
+        echo "━━━ 3. OPENCODE PROVIDER ━━━"
+        echo "   (Không cần API key — chỉ cần chọn model)"
+        edit_var OPENCODE_API_URL "   API URL (để trống = dùng mặc định): "
+        edit_var OPENCODE_MODEL   "   Model: "
+    fi
+    echo ""
+
+    # 4. Admin + Scan
+    echo "━━━ 4. TÙY CHỌN ━━━"
+    edit_var ADMIN_CHAT_ID       "   Admin Chat ID (để trống = bỏ qua): "
+    cur_min="$(getv SCAN_MINUTES)"
+    read -p "   Scan mỗi X phút [${cur_min:-5}]: " mins
+    if [ -n "${mins}" ]; then
+        edit_env "SCAN_MINUTES" "${mins}"
+    fi
+    echo ""
+
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║  ✅ Đã lưu cấu hình!                        ║"
+    echo "║  Chạy 'nhatnam' để khởi động bot            ║"
+    echo "╚══════════════════════════════════════════════╝"
+    echo ""
+    # Hien thi.tom tat
+    echo "📋 Cấu hình hiện tại:"
+    echo "   BOT_TOKEN:     $([ -n "$(getv BOT_TOKEN)" ] && echo '✅ Đã cấu hình' || echo '❌ Chưa có')"
+    echo "   AI_PROVIDER:   ${prov}"
+    echo "   Model:         $(getv OPENCODE_MODEL 2>/dev/null || getv CUSTOM_MODEL 2>/dev/null || echo '❌ Chưa chọn')"
+    echo "   Admin Chat ID: $(getv ADMIN_CHAT_ID 2>/dev/null || echo 'Không đặt')"
+    echo "   Scan mỗi:      $(getv SCAN_MINUTES 2>/dev/null || echo '5') phút"
+    echo ""
+}
+
+do_start() {
+    if ! python3 "${DIR}/validate.py"; then
+        echo ""
+        read -p "❓ Nhập/cập nhật cấu hình ngay? (y/N): " yn
+        if [ "${yn}" = "y" ] || [ "${yn}" = "Y" ]; then
+            do_config
+            python3 "${DIR}/validate.py" || { echo "❌ Vẫn lỗi cấu hình."; exit 1; }
+        else
+            echo "💡 Chạy 'nhatnam config' khi sẵn sàng."
+            exit 1
+        fi
+    fi
+    echo "🚀 Khởi động AI Agent News Bot (Ctrl+C để tắt)..."
+    cd "${DIR}"
+    exec bash run.sh
+}
+
+case "${1:-start}" in
+    config) do_config ;;
+    start|"") do_start ;;
+    *) echo "Cách dùng: nhatnam [start|config]" ;;
+esac
