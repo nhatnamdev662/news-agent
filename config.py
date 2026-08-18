@@ -9,10 +9,13 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "").strip()
 
-# ---- AI provider (custom / OpenAI-compatible) ----
+# ---- AI provider ----
+AI_PROVIDER = os.getenv("AI_PROVIDER", "opencode").strip()
 CUSTOM_API_KEY = os.getenv("CUSTOM_API_KEY", "").strip()
 CUSTOM_API_URL = os.getenv("CUSTOM_API_URL", "https://api.darkapi.dev/v1").strip()
-CUSTOM_MODEL = os.getenv("CUSTOM_MODEL", "laguna-s-2.1-free").strip()
+CUSTOM_MODEL = os.getenv("CUSTOM_MODEL", "").strip()
+OPENCODE_API_URL = os.getenv("OPENCODE_API_URL", "https://opencode.ai/zen/v1").strip()
+OPENCODE_MODEL = os.getenv("OPENCODE_MODEL", "deepseek-v4-flash-free").strip()
 MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", "6") or "6")
 
 # ---- Schedule ----
@@ -98,10 +101,14 @@ def validate_config() -> Tuple[bool, List[str]]:
     errs = []
     if not BOT_TOKEN:
         errs.append("BOT_TOKEN (token bot Telegram)")
-    if not CUSTOM_API_KEY:
-        errs.append("CUSTOM_API_KEY (key API provider)")
-    if not CUSTOM_API_URL:
-        errs.append("CUSTOM_API_URL (base URL)")
-    if not CUSTOM_MODEL:
-        errs.append("CUSTOM_MODEL (chưa chọn model)")
+    if AI_PROVIDER == "custom":
+        if not CUSTOM_API_KEY:
+            errs.append("CUSTOM_API_KEY")
+        if not CUSTOM_API_URL:
+            errs.append("CUSTOM_API_URL")
+        if not CUSTOM_MODEL:
+            errs.append("CUSTOM_MODEL")
+    elif AI_PROVIDER == "opencode":
+        if not OPENCODE_MODEL:
+            errs.append("OPENCODE_MODEL")
     return (len(errs) == 0, errs)

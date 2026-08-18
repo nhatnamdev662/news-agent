@@ -377,16 +377,16 @@ async def btn(update, ctx):
             await query.edit_message_text("⚠️ Chỉ admin mới được đổi model.")
             return
         model_name = data.split(":", 1)[1]
-        env_key = "CUSTOM_MODEL"
+        env_key = "OPENCODE_MODEL" if config.AI_PROVIDER == "opencode" else "CUSTOM_MODEL"
         _save_env(env_key, model_name)
-        if False:  # opencode removed
+        if config.AI_PROVIDER == "opencode":
             config.CUSTOM_MODEL = model_name
         else:
             config.CUSTOM_MODEL = model_name
-        provider = get_provider("custom")
+        provider = get_provider(config.AI_PROVIDER)
         await query.edit_message_text(
             f"✅ Đã chọn model: <b>{model_name}</b>\n"
-            f"Provider: {"custom"}",
+            f"Provider: {config.AI_PROVIDER}",
             parse_mode=ParseMode.HTML)
 
     # --- Unknown ---
@@ -476,10 +476,48 @@ async def _reply(update, query, text: str, with_kb: bool = True, category: str =
 
 # ==================== ADMIN: PROVIDER / MODEL ====================
 
-async def set_model(update, ctx):
+async def set_provider(update, ctx):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⚠️ Lệnh này chỉ dành cho admin.", parse_mode=ParseMode.HTML)
+        return
+    providers = list_providers()
+    rows = []
+    for p in providers:
+        mark = "✅ " if p == config.AI_PROVIDER else ""
+        rows.append([InlineKeyboardButton(f"{mark}{p}", callback_data=f"pick_provider:{p}")])
+    kb = InlineKeyboardMarkup(rows)
     await update.message.reply_text(
-        "⚠️ Dùng <code>nhatnam config</code> trên Termux để đổi model.",
-        parse_mode=ParseMode.HTML)
+        "<b>⚙️ Chọn provider AI</b>\n━━━━━━━━━━━━━━━━\n"
+        "• <b>opencode</b> — miễn phí, không cần API key\n"
+        "• <b>custom</b> — cần API key + base URL",
+        parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def set_model(update, ctx):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⚠️ Lệnh này chỉ dành cho admin.", parse_mode=ParseMode.HTML)
+        return
+    await update.message.reply_text("⏳ Đang quét danh sách model...", parse_mode=ParseMode.HTML)
+
+    prov = get_provider(config.AI_PROVIDER)
+    models = await prov.fetch_models()
+
+    if not models:
+        await update.message.reply_text(
+            "⚠️ Không quét được model. Dùng <code>nhatnam config</code> để đổi.",
+            parse_mode=ParseMode.HTML)
+        return
+
+    rows = []
+    current = config.OPENCODE_MODEL if config.AI_PROVIDER == "opencode" else config.CUSTOM_MODEL
+    for m in models[:20]:
+        mark = "✅ " if m == current else ""
+        rows.append([InlineKeyboardButton(f"{mark}{m}", callback_data=f"pick_model:{m}")])
+    kb = InlineKeyboardMarkup(rows)
+    await update.message.reply_text(
+        f"<b>⚙️ Chọn model ({config.AI_PROVIDER})</b>\n"
+        f"Tổng: {len(models)} model — hiển thị 20 đầu:",
+        parse_mode=ParseMode.HTML, reply_markup=kb)
 
 
 async def schedule_cmd(update, ctx):
@@ -562,7 +600,7 @@ async def settings_cmd(update, ctx):
     await update.message.reply_text(
         "<b>⚙️ Cấu hình hiện tại</b>\n━━━━━━━━━━━━━━━━\n"
         f"• BOT_TOKEN: {'✅' if config.BOT_TOKEN else '❌'}\n"
-        f"• Provider: <b>{"custom"}</b>\n"
+        f"• Provider: <b>{config.AI_PROVIDER}</b>\n"
         f"• Model: <b>{cur_model or '❌ chưa chọn'}</b>\n"
         f"• API URL: <code>{cur_url or 'mặc định'}</code>\n"
         f"• Admin Chat ID: <code>{config.ADMIN_CHAT_ID or 'không đặt'}</code>\n"
@@ -698,7 +736,8 @@ async def on_startup(app):
         BotCommand("the_loai", "Chọn thể loại"),
         BotCommand("ho_tro", "Hướng dẫn sử dụng"),
         BotCommand("ping", "Kiểm tra bot"),
-        BotCommand("set_model", "Đổi model (admin)"),
+        BotCommand("set_provider", "Chọn provider AI (admin)"),
+        BotCommand("set_model", "Chọn model AI (admin)"),
         BotCommand("schedule", "Đặt lịch gửi tin (admin)"),
         BotCommand("scan", "Quét tự động (admin)"),
         BotCommand("scan_now", "Quét ngay (admin)"),
@@ -725,9 +764,9 @@ def main():
             print("  -", e)
         print("Hãy sửa .env hoặc dùng: nhatnam config")
         return
-    provider = get_provider("custom")
+    provider = get_provider(config.AI_PROVIDER)
     config.CUSTOM_MODEL
-    print(f"🚀 AI Agent News Bot — provider: {"custom"} | model: {cur_model}")
+    print(f"🚀 AI Agent News Bot — provider: {config.AI_PROVIDER} | model: {cur_model}")
 
     app = Application.builder().token(config.BOT_TOKEN).post_init(post_init).build()
 
@@ -737,6 +776,7 @@ def main():
     app.add_handler(CommandHandler(["news", "tin"], news_cmd))
     app.add_handler(CommandHandler(["search", "tim"], search_cmd))
     app.add_handler(CommandHandler("the_loai", news_cmd))
+    app.add_handler(CommandHandler("set_provider", set_provider))
     app.add_handler(CommandHandler("set_model", set_model))
     app.add_handler(CommandHandler("schedule", schedule_cmd))
     app.add_handler(CommandHandler("scan", scan_cmd))
